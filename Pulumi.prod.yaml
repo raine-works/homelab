@@ -1,0 +1,10 @@
+config:
+  gcp:project: homelab-497021
+  gcp:region: us-west3
+  gcp:zone: us-west3-a
+  homelab:netbirdDomain: netbird.raineworks.com
+  homelab:backendBucketName: raineworks_homelab_pulumi_backend
+  homelab:instanceType: e2-small
+  homelab:diskSizeGb: "50"
+secretsprovider: gcpkms://projects/homelab-497021/locations/us-west3/keyRings/pulumi-keyring/cryptoKeys/pulumi-key
+encryptedkey: CiQA6FPKbIcDswz5iH04qlMTRjI65vgQqWJxrsH3+gObLAGkbOwSSQDCgdU6qZjfBUE7o9rFu4iD/dX09ibCq3wS9HseDMBCX46E00ZB+LMvPt6FkyC9MfHxvPU3rUSiboy3gpySJBr8FSY3cqLHE2o=

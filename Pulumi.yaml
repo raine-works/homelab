@@ -1,0 +1,9 @@
+name: homelab
+description: Homelab GCP network, NetBird zero-trust mesh VPN controller, and Watchtower managed via Pulumi & Bun
+runtime:
+  name: nodejs
+  options:
+    packagemanager: bun
+backend:
+  url: gs://raineworks_homelab_pulumi_backend
+

@@ -1,0 +1,210 @@
+# NetBird Zero-Trust Mesh VPN & Controller Stack
+# Orchestrates NetBird Management Server, Signal Exchange, Dashboard UI, Traefik Reverse Proxy, and CrowdSec.
+# Domain: netbird.raineworks.com (Ports 80, 443, 33073 TCP & 51820 UDP)
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.7.7
+    container_name: netbird-crowdsec
+    restart: always
+    environment:
+      - COLLECTIONS=crowdsecurity/linux
+    volumes:
+      - /etc/crowdsec:/etc/crowdsec
+      - crowdsec_db:/var/lib/crowdsec/data
+    labels:
+      - "traefik.enable=false"
+    networks:
+      - homelab-netbird-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  netbird-server:
+    image: netbirdio/netbird-server:latest
+    container_name: netbird-server
+    restart: always
+    extra_hosts:
+      - "netbird.raineworks.com:host-gateway"
+    ports:
+      - "3478:3478/udp"
+    command: ["--config", "/etc/netbird/config.yaml"]
+    volumes:
+      - netbird_data:/var/lib/netbird
+      - ./config.yaml:/etc/netbird/config.yaml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbird-grpc.rule=Host(`netbird.raineworks.com`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.`))"
+      - "traefik.http.routers.netbird-grpc.entrypoints=websecure"
+      - "traefik.http.routers.netbird-grpc.tls=true"
+      - "traefik.http.routers.netbird-grpc.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.netbird-grpc.tls.domains[0].main=netbird.raineworks.com"
+      - "traefik.http.routers.netbird-grpc.service=netbird-server-h2c"
+      - "traefik.http.routers.netbird-grpc.priority=100"
+      - "traefik.http.routers.netbird-backend.rule=Host(`netbird.raineworks.com`) && (PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`) || PathPrefix(`/api`) || PathPrefix(`/oauth2`) || PathPrefix(`/.well-known`))"
+      - "traefik.http.routers.netbird-backend.entrypoints=websecure"
+      - "traefik.http.routers.netbird-backend.tls=true"
+      - "traefik.http.routers.netbird-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.netbird-backend.tls.domains[0].main=netbird.raineworks.com"
+      - "traefik.http.routers.netbird-backend.service=netbird-server"
+      - "traefik.http.routers.netbird-backend.priority=100"
+      - "traefik.http.services.netbird-server.loadbalancer.server.port=80"
+      - "traefik.http.services.netbird-server-h2c.loadbalancer.server.port=80"
+      - "traefik.http.services.netbird-server-h2c.loadbalancer.server.scheme=h2c"
+    networks:
+      - homelab-netbird-net
+    depends_on:
+      - crowdsec
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  netbird-dashboard:
+    image: netbirdio/dashboard:latest
+    container_name: netbird-dashboard
+    restart: always
+    extra_hosts:
+      - "netbird.raineworks.com:host-gateway"
+    environment:
+      - NETBIRD_MGMT_API_ENDPOINT=https://netbird.raineworks.com
+      - NETBIRD_MGMT_GRPC_API_ENDPOINT=https://netbird.raineworks.com
+      - AUTH_AUDIENCE=netbird-dashboard
+      - AUTH_CLIENT_ID=netbird-dashboard
+      - AUTH_CLIENT_SECRET=
+      - AUTH_AUTHORITY=https://netbird.raineworks.com/oauth2
+      - USE_AUTH0=false
+      - AUTH_SUPPORTED_SCOPES=openid profile email groups
+      - AUTH_REDIRECT_URI=/nb-auth
+      - AUTH_SILENT_REDIRECT_URI=/nb-silent-auth
+      - NGINX_SSL_PORT=443
+      - LETSENCRYPT_DOMAIN=none
+      - NETBIRD_AGENT_NETWORK_ENABLED=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbird-dashboard.rule=Host(`netbird.raineworks.com`)"
+      - "traefik.http.routers.netbird-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.netbird-dashboard.tls=true"
+      - "traefik.http.routers.netbird-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.netbird-dashboard.tls.domains[0].main=netbird.raineworks.com"
+      - "traefik.http.routers.netbird-dashboard.service=dashboard"
+      - "traefik.http.routers.netbird-dashboard.priority=1"
+      - "traefik.http.services.dashboard.loadbalancer.server.port=80"
+    networks:
+      - homelab-netbird-net
+    depends_on:
+      - netbird-server
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  netbird-proxy:
+    image: netbirdio/reverse-proxy:latest
+    container_name: netbird-proxy
+    restart: always
+    extra_hosts:
+      - "netbird.raineworks.com:host-gateway"
+    command:
+      - --domain
+      - netbird.raineworks.com
+      - --private
+      - --mgmt
+      - http://netbird-server:80
+      - --addr
+      - :8443
+      - --cert-dir
+      - /certs
+      - --acme-certs
+      - --acme-challenge-type
+      - http-01
+      - --acme-addr
+      - :8081
+      - --forwarded-proto
+      - https
+      - --crowdsec-api-url
+      - http://netbird-crowdsec:8080
+      - --crowdsec-api-key
+      - ${NB_PROXY_CROWDSEC_API_KEY:-}
+    environment:
+      - NB_PROXY_TOKEN=${NB_PROXY_TOKEN}
+      - NB_PROXY_ALLOW_INSECURE=true
+    volumes:
+      - netbird_proxy_certs:/certs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netbird-proxy-acme.rule=PathPrefix(`/.well-known/acme-challenge/`)"
+      - "traefik.http.routers.netbird-proxy-acme.entrypoints=web"
+      - "traefik.http.routers.netbird-proxy-acme.priority=10000"
+      - "traefik.http.routers.netbird-proxy-acme.middlewares="
+      - "traefik.http.services.netbird-proxy-acme.loadbalancer.server.port=8081"
+      - "traefik.http.services.netbird-proxy-acme.loadbalancer.server.scheme=http"
+      - "traefik.tcp.routers.netbird-proxy-sni.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.netbird-proxy-sni.entrypoints=websecure"
+      - "traefik.tcp.routers.netbird-proxy-sni.priority=1"
+      - "traefik.tcp.routers.netbird-proxy-sni.tls.passthrough=true"
+      - "traefik.tcp.services.netbird-proxy-sni.loadbalancer.server.port=8443"
+    networks:
+      - homelab-netbird-net
+    depends_on:
+      - netbird-server
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  netbird-traefik:
+    image: traefik:v3.6
+    container_name: netbird-traefik
+    restart: always
+    environment:
+      - DOCKER_API_VERSION=1.44
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.allowACMEByPass=true"
+      - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=0"
+      - "--entrypoints.websecure.transport.respondingTimeouts.writeTimeout=0"
+      - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=0"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@raineworks.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--serverstransport.insecureskipverify=true"
+      - "--serverstransport.forwardingtimeouts.responseheadertimeout=0s"
+      - "--serverstransport.forwardingtimeouts.idleconntimeout=0s"
+      - "--providers.file.filename=/etc/traefik/dynamic.yaml"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - netbird_traefik_letsencrypt:/letsencrypt
+      - ./dynamic.yaml:/etc/traefik/dynamic.yaml:ro
+    networks:
+      - homelab-netbird-net
+    depends_on:
+      - netbird-server
+      - netbird-dashboard
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  netbird_data:
+  netbird_traefik_letsencrypt:
+  netbird_proxy_certs:
+  crowdsec_db:
+
+networks:
+  homelab-netbird-net:
+    external: true

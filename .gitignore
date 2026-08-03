@@ -1,0 +1,10 @@
+node_modules/
+.bun/
+dist/
+.pulumi/
+*.log
+.DS_Store
+.env*
+*.pem
+*.key
+

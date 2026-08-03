@@ -1,0 +1,32 @@
+{
+  "name": "homelab",
+  "version": "0.1.0",
+  "description": "Homelab GCP network, NetBird zero-trust mesh VPN controller, and Watchtower managed with Bun and Pulumi",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "auth:adc": "gcloud auth application-default login --project homelab-497021 && gcloud config set project homelab-497021",
+    "auth:gcp": "gcloud auth login --project homelab-497021",
+    "pulumi:login": "pulumi login gs://${PULUMI_BACKEND_BUCKET:-raineworks_homelab_pulumi_backend}",
+    "pulumi:init": "pulumi stack init prod --secrets-provider=\"gcpkms://projects/homelab-497021/locations/us-west3/keyRings/pulumi-keyring/cryptoKeys/pulumi-key\"",
+    "pulumi:preview": "pulumi preview -s prod",
+    "pulumi:up": "pulumi up -s prod",
+    "pulumi:down": "pulumi down -s prod",
+    "pulumi:refresh": "pulumi refresh -s prod",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pulumi/cloudflare": "6.18.0",
+    "@pulumi/command": "1.2.1",
+    "@pulumi/gcp": "8.41.1",
+    "@pulumi/pulumi": "3.254.0",
+    "@pulumi/tls": "5.5.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.5",
+    "@types/node": "26.1.2",
+    "typescript": "5.9.3"
+  }
+}

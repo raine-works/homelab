@@ -1,0 +1,19 @@
+# Watchtower Container Auto-Update Daemon
+# Automatically checks for updated container image tags every 3600s (1 hour)
+# and performs rolling container updates on the host.
+services:
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: always
+    command: --interval 3600 --cleanup
+    environment:
+      - WATCHTOWER_WARN_ON_HEAD_FAILURE=never
+      - DOCKER_API_VERSION=1.44
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

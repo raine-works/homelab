@@ -35,3 +35,15 @@ export const backendBucketName =
 /** NetBird Management Server URL (`https://netbird.raineworks.com`) */
 export const netbirdManagementUrl =
   config.get("netbirdManagementUrl") || `https://${netbirdDomain}`;
+
+/**
+ * Pinned subnet for the `homelab-netbird-net` Docker network.
+ * Required so `netbird-traefik` (the bundled reverse proxy in front of netbird-server)
+ * can be given a static IP, which NetBird's `reverseProxy.trustedHTTPProxies` /
+ * `trustedPeers` config needs to trust real client IPs instead of a wildcard.
+ * See: https://docs.netbird.io/selfhosted/maintenance/upgrade#migration-notes
+ */
+export const netbirdNetSubnet = "172.30.0.0/24";
+
+/** Static IP assigned to `netbird-traefik` within `homelab-netbird-net`. */
+export const netbirdTraefikStaticIp = "172.30.0.10";

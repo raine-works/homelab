@@ -1,4 +1,5 @@
 import * as command from "@pulumi/command";
+import { netbirdNetSubnet } from "../config";
 import { vpsInstance } from "../vps";
 import { getSshConnection } from "./ssh";
 
@@ -7,7 +8,8 @@ import { getSshConnection } from "./ssh";
  *
  * Ensures `/opt/homelab/services` exists, guarantees that Docker Engine,
  * Docker Compose plugin, and prerequisite packages (sqlite3, curl, jq) are installed
- * over SSH, and pre-creates the `homelab-netbird-net` Docker network before service containers start.
+ * over SSH, and pre-creates the `homelab-netbird-net` Docker network (pinned to
+ * `netbirdNetSubnet`) before service containers start.
  */
 const vpsInitScript = `
       export DEBIAN_FRONTEND=noninteractive
@@ -52,7 +54,30 @@ const vpsInitScript = `
       sudo rm -rf /opt/homelab/docker/containers/* || true
       sudo systemctl start docker || true
 
-      sudo docker network create homelab-netbird-net || true
+      # Pin homelab-netbird-net to a fixed subnet so netbird-traefik can be given a
+      # static IP (required for NetBird's reverseProxy.trustedHTTPProxies/trustedPeers
+      # to trust real client IPs instead of 0.0.0.0/0). If the network already exists
+      # with a different (or no pinned) subnet, tear it down and recreate it - this
+      # requires briefly stopping every service attached to it.
+      CURRENT_NETBIRD_SUBNET=$(sudo docker network inspect homelab-netbird-net --format '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null || echo "")
+      if [ "$CURRENT_NETBIRD_SUBNET" != "${netbirdNetSubnet}" ]; then
+        echo "Pinning homelab-netbird-net to subnet ${netbirdNetSubnet} (recreating network)..."
+        for svc in netbird; do
+          if [ -d "/opt/homelab/services/$svc" ]; then
+            (cd "/opt/homelab/services/$svc" && sudo docker compose down) || true
+          fi
+        done
+        sudo docker network rm homelab-netbird-net 2>/dev/null || true
+        sudo docker network create --subnet "${netbirdNetSubnet}" homelab-netbird-net
+        # Bring services stopped above back up immediately. Their own Pulumi command
+        # resources only re-run when their own inputs change, so without this they'd
+        # stay down until something unrelated to this migration happened to redeploy them.
+        for svc in netbird; do
+          if [ -d "/opt/homelab/services/$svc" ]; then
+            (cd "/opt/homelab/services/$svc" && sudo docker compose up -d) || true
+          fi
+        done
+      fi
     `;
 
 export const vpsInit = new command.remote.Command(
@@ -61,7 +86,7 @@ export const vpsInit = new command.remote.Command(
     connection: getSshConnection(vpsInstance.id),
     create: vpsInitScript,
     update: vpsInitScript,
-    triggers: [vpsInstance.id],
+    triggers: [vpsInstance.id, netbirdNetSubnet],
   },
   { dependsOn: [vpsInstance] }
 );

@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as command from "@pulumi/command";
 import * as pulumi from "@pulumi/pulumi";
-import { netbirdDomain, project } from "../config";
+import { netbirdDomain, netbirdTraefikStaticIp, project } from "../config";
 import { netbirdAuthSecret, netbirdStoreEncryptionKey } from "../secrets";
 import { vpsInstance } from "../vps";
 import { vpsInit } from "./init";
@@ -63,7 +63,9 @@ server:
 
   reverseProxy:
     trustedHTTPProxies:
-      - "0.0.0.0/0"
+      - "${netbirdTraefikStaticIp}/32"
+    trustedPeers:
+      - "${netbirdTraefikStaticIp}/32"
 
   store:
     engine: "sqlite"
@@ -74,6 +76,9 @@ EOF
 const setupProxyTokenAndUpScript = `
   cd /opt/homelab/services/netbird
   docker compose up -d netbird-server crowdsec
+  # config.yaml is bind-mounted and only read at startup, so an already-running
+  # netbird-server would keep serving the previous config after it is regenerated above.
+  docker compose restart netbird-server
   MAX_RETRIES=20
   RETRY_COUNT=0
   while ! docker exec netbird-server /go/bin/netbird-server admin token list -c /etc/netbird/config.yaml &> /dev/null; do

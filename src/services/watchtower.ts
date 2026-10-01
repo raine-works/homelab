@@ -40,7 +40,10 @@ export const watchtowerService = new command.remote.Command(
       docker compose up -d
     `,
     delete: "true",
-    triggers: [vpsInstance.id, watchtowerCopy.id],
+    // Re-run on every `pulumi up`, not just when the compose file or VM changes.
+    // `docker compose up -d` is idempotent, and this guards against
+    // drift (e.g. the container being removed out-of-band) going unnoticed indefinitely.
+    triggers: [vpsInstance.id, watchtowerCopy.id, new Date().toISOString()],
   },
   { dependsOn: [watchtowerCopy] }
 );
